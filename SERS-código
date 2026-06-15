@@ -1,0 +1,258 @@
+from datetime import datetime
+import time
+
+PRECO_KWH_NORMAL = 1.97
+PRECO_KWH_PICO = 2.25
+TARIFA_SESSAO = 0.89
+CO2_ECONOMIZADO = 0.12
+
+usuarios = {}
+sessoes = []
+
+usuario_logado = None
+sessao_atual = None
+
+def obter_tarifa():
+    hora = datetime.now().hour
+    return PRECO_KWH_PICO if 18 <= hora <= 22 else PRECO_KWH_NORMAL
+
+def cadastrar_usuario():
+    nome = input("Nome: ").strip()
+    email = input("Email: ").strip().lower()
+
+    if not nome:
+        print("Nome inválido.")
+        return
+
+    if email in usuarios:
+        print("Usuário já cadastrado.")
+        return
+
+    usuarios[email] = {
+        "nome": nome,
+        "saldo": 0.0,
+        "pontos": 0,
+        "historico": []
+    }
+
+    print("Usuário cadastrado com sucesso!")
+
+def selecionar_usuario():
+    global usuario_logado
+
+    email = input("Email: ").strip().lower()
+
+    if email not in usuarios:
+        print("Usuário não encontrado.")
+        return
+
+    usuario_logado = email
+    print(f"Usuário ativo: {usuarios[email]['nome']}")
+
+def adicionar_saldo():
+    if usuario_logado is None:
+        print("Selecione um usuário primeiro.")
+        return
+
+    try:
+        valor = float(input("Valor para adicionar: R$ "))
+
+        if valor <= 0:
+            print("Valor inválido.")
+            return
+
+        usuarios[usuario_logado]["saldo"] += valor
+
+        print(f"Saldo atual: R$ {usuarios[usuario_logado]['saldo']:.2f}")
+
+    except ValueError:
+        print("Digite um valor válido.")
+
+def encerrar_recarga():
+    global sessao_atual
+    global usuario_logado
+
+    usuario = usuarios[usuario_logado]
+
+    usuario["saldo"] -= sessao_atual["valor_total"]
+
+    pontos = int(sessao_atual["valor_total"] / 5)
+    usuario["pontos"] += pontos
+
+    sessao_atual["fim"] = datetime.now()
+
+    duracao = (
+        sessao_atual["fim"] - sessao_atual["inicio"]
+    ).total_seconds() / 60
+
+    sessao_atual["duracao"] = round(duracao, 2)
+    sessao_atual["status"] = "Concluída"
+
+    co2 = sessao_atual["energia"] * CO2_ECONOMIZADO
+    sessao_atual["co2_evitado"] = round(co2, 2)
+
+    sessoes.append(sessao_atual)
+    usuario["historico"].append(sessao_atual)
+
+    print("\n===== RECARGA CONCLUÍDA =====")
+    print(f"Valor pago: R$ {sessao_atual['valor_total']:.2f}")
+    print(f"Pontos ganhos: {pontos}")
+    print(f"CO₂ evitado: {co2:.2f} kg")
+    print(f"Saldo restante: R$ {usuario['saldo']:.2f}")
+
+    sessao_atual = None
+    usuario_logado = None
+
+def iniciar_recarga():
+    global sessao_atual
+
+    if usuario_logado is None:
+        print("Selecione um usuário primeiro.")
+        return
+
+    try:
+        energia = float(input("Energia desejada (kWh): "))
+
+        if energia <= 0:
+            print("Valor inválido.")
+            return
+
+    except ValueError:
+        print("Digite um valor válido.")
+        return
+
+    tarifa = obter_tarifa()
+    total = (energia * tarifa) + TARIFA_SESSAO
+
+    if usuarios[usuario_logado]["saldo"] < total:
+        print(f"Saldo insuficiente. Necessário: R$ {total:.2f}")
+        return
+
+    sessao_atual = {
+        "usuario": usuarios[usuario_logado]["nome"],
+        "email": usuario_logado,
+        "energia": energia,
+        "valor_total": total,
+        "inicio": datetime.now(),
+        "status": "Carregando"
+    }
+
+    print("\n===== RECARGA INICIADA =====")
+
+    carregado = 0
+
+    while carregado < energia:
+        time.sleep(1)
+        carregado += energia / 10
+
+        if carregado > energia:
+            carregado = energia
+
+        porcentagem = (carregado / energia) * 100
+
+        print(
+            f"Carregando... {porcentagem:.0f}% "
+            f"({carregado:.2f}/{energia:.2f} kWh)"
+        )
+
+    encerrar_recarga()
+
+def consultar_historico():
+    if usuario_logado is None:
+        print("Selecione um usuário.")
+        return
+
+    historico = usuarios[usuario_logado]["historico"]
+
+    if not historico:
+        print("Nenhuma recarga registrada.")
+        return
+
+    for sessao in historico:
+        print("\n----------------")
+        print(sessao["inicio"].strftime("%d/%m/%Y %H:%M"))
+        print(f"Energia: {sessao['energia']} kWh")
+        print(f"Valor: R$ {sessao['valor_total']:.2f}")
+        print(f"Status: {sessao['status']}")
+
+def simular_consumo():
+    try:
+        bateria = float(input("Capacidade da bateria (kWh): "))
+        carga = float(input("Carga atual (%): "))
+
+        energia = (bateria * (100 - carga)) / 100
+        autonomia = energia * 6
+
+        print(f"Energia necessária: {energia:.2f} kWh")
+        print(f"Autonomia estimada: {autonomia:.0f} km")
+
+    except ValueError:
+        print("Valor inválido.")
+
+def trocar_pontos():
+    if usuario_logado is None:
+        print("Selecione um usuário.")
+        return
+
+    usuario = usuarios[usuario_logado]
+
+    if usuario["pontos"] < 100:
+        print("Necessário 100 pontos.")
+        return
+
+    usuario["pontos"] -= 100
+    usuario["saldo"] += 10
+
+    print("R$10 adicionados ao saldo.")
+
+def relatorio():
+    energia_total = sum(s["energia"] for s in sessoes)
+    faturamento = sum(s["valor_total"] for s in sessoes)
+    co2_total = sum(s["co2_evitado"] for s in sessoes)
+
+    print("\n===== DASHBOARD =====")
+    print(f"Usuários: {len(usuarios)}")
+    print(f"Sessões: {len(sessoes)}")
+    print(f"Energia total: {energia_total:.2f} kWh")
+    print(f"Receita: R$ {faturamento:.2f}")
+    print(f"CO₂ evitado: {co2_total:.2f} kg")
+
+while True:
+
+    print("\n===== ELETROPOSTO =====")
+
+    if usuario_logado:
+        print(f"Usuário atual: {usuarios[usuario_logado]['nome']}")
+
+    print("1 - Cadastrar usuário")
+    print("2 - Selecionar usuário")
+    print("3 - Adicionar saldo")
+    print("4 - Iniciar recarga automática")
+    print("5 - Histórico")
+    print("6 - Simular consumo")
+    print("7 - Trocar pontos")
+    print("8 - Relatório")
+    print("0 - Sair")
+
+    opcao = input("Escolha: ")
+
+    if opcao == "1":
+        cadastrar_usuario()
+    elif opcao == "2":
+        selecionar_usuario()
+    elif opcao == "3":
+        adicionar_saldo()
+    elif opcao == "4":
+        iniciar_recarga()
+    elif opcao == "5":
+        consultar_historico()
+    elif opcao == "6":
+        simular_consumo()
+    elif opcao == "7":
+        trocar_pontos()
+    elif opcao == "8":
+        relatorio()
+    elif opcao == "0":
+        break
+    else:
+        print("Opção inválida.")
